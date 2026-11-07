@@ -1,0 +1,2 @@
+[functions.charger-api]
+verify_jwt = false
