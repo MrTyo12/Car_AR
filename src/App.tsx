@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { Gauge, Wrench, Package, Video, Car } from 'lucide-react';
+import { Gauge, Wrench, Package, Video, Car, LogOut } from 'lucide-react';
+import { AuthProvider, useAuth } from '@/lib/auth';
+import { Login } from '@/views/Login';
 import { Dashboard } from '@/views/Dashboard';
 import { Projects } from '@/views/Projects';
 import { PartsTools } from '@/views/PartsTools';
@@ -14,8 +16,35 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'media', label: 'Tutorials', icon: <Video size={18} /> },
 ];
 
-export default function App() {
+function Shell() {
+  const { loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-carbon-950 flex items-center justify-center">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-scat-600 shadow-lg shadow-scat-950/40">
+          <Car size={22} className="text-white animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
+  return <Gate />;
+}
+
+function Gate() {
+  const { user } = useAuth();
+
+  if (!user) return <Login />;
+
+  return <AppContent />;
+}
+
+function AppContent() {
+  const { user, signOut } = useAuth();
   const [active, setActive] = useState<Tab>('dashboard');
+
+  const email = user?.email ?? '';
 
   return (
     <div className="min-h-screen bg-carbon-950">
@@ -36,23 +65,53 @@ export default function App() {
             </div>
           </div>
 
-          {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-1 rounded-xl bg-carbon-900 p-1 border border-carbon-800">
-            {tabs.map((t) => (
+          <div className="flex items-center gap-3">
+            {/* Desktop nav */}
+            <nav className="hidden md:flex items-center gap-1 rounded-xl bg-carbon-900 p-1 border border-carbon-800">
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setActive(t.id)}
+                  className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all ${
+                    active === t.id
+                      ? 'bg-scat-600 text-white shadow-lg shadow-scat-950/30'
+                      : 'text-carbon-400 hover:text-carbon-200'
+                  }`}
+                >
+                  {t.icon}
+                  {t.label}
+                </button>
+              ))}
+            </nav>
+
+            {/* User + sign out */}
+            <div className="hidden sm:flex items-center gap-2">
+              <span className="text-xs font-medium text-carbon-400 max-w-[160px] truncate" title={email}>
+                {email}
+              </span>
               <button
-                key={t.id}
-                onClick={() => setActive(t.id)}
-                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all ${
-                  active === t.id
-                    ? 'bg-scat-600 text-white shadow-lg shadow-scat-950/30'
-                    : 'text-carbon-400 hover:text-carbon-200'
-                }`}
+                onClick={() => signOut()}
+                className="flex items-center gap-1.5 rounded-lg bg-carbon-800 px-3 py-2 text-sm font-medium text-carbon-300 transition-all hover:bg-carbon-700 hover:text-carbon-100"
+                title="Sign out"
               >
-                {t.icon}
-                {t.label}
+                <LogOut size={16} />
               </button>
-            ))}
-          </nav>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile user bar */}
+        <div className="flex sm:hidden items-center justify-between border-t border-carbon-800 px-4 py-2">
+          <span className="text-xs font-medium text-carbon-400 truncate" title={email}>
+            {email}
+          </span>
+          <button
+            onClick={() => signOut()}
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-carbon-300 transition-all hover:text-carbon-100"
+          >
+            <LogOut size={14} />
+            Sign out
+          </button>
         </div>
       </header>
 
@@ -84,5 +143,13 @@ export default function App() {
         </div>
       </nav>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <Shell />
+    </AuthProvider>
   );
 }
