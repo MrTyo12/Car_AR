@@ -1,5 +1,7 @@
 [functions.charger-api]
-verify_jwt = false
-
-[functions.ar-session]
 verify_jwt = true
+
+# This dedicated broker validates Supabase JWTs on issuance and opaque AR tokens
+# on read/revoke itself. Exchange uses a single-use PKCE-bound authorization code.
+[functions.ar-session]
+verify_jwt = false

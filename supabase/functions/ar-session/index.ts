@@ -1,262 +1,210 @@
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 
+const origin = 'https://automotive-diy-proje-8ay4.bolt.host';
+const callback = 'com.tayo.carrepairar://auth/callback';
+
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+  'Access-Control-Allow-Origin': origin,
+  'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Content-Type': 'application/json',
+  'Cache-Control': 'no-store',
+  'Referrer-Policy': 'no-referrer',
+  'Vary': 'Origin',
 };
 
-const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const reply = (status: number, value: unknown) =>
+  new Response(JSON.stringify(value), { status, headers: corsHeaders });
 
-// Service-role client — bypasses RLS, used only server-side for privileged lookups.
-const adminClient = createClient(supabaseUrl, serviceRoleKey);
+const random = () =>
+  btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 
-interface SessionRow {
-  id: string;
-  user_id: string;
-  project_id: string | null;
-  unity_build_version: string;
-  device_info: string;
-  status: string;
-  started_at: string;
-  ended_at: string | null;
+async function digest(value: string): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
 }
 
-function jsonResponse(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data, null, 2), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
+async function hash(value: string): Promise<string> {
+  return [...await digest(value)].map(v => v.toString(16).padStart(2, '0')).join('');
 }
 
-/**
- * Extracts the bearer token from the Authorization header and resolves it
- * to a Supabase user. Returns null if the token is missing or invalid.
- * Service-role credentials are never exposed — only the caller's own JWT
- * is used to identify them.
- */
-async function resolveUser(req: Request): Promise<string | null> {
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
-  const token = authHeader.replace("Bearer ", "").trim();
-  if (!token) return null;
-
-  const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-  const { data, error } = await userClient.auth.getUser();
-  if (error || !data.user) return null;
-  return data.user.id;
+async function challenge(value: string): Promise<string> {
+  return btoa(String.fromCharCode(...await digest(value)))
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 
-/** Checks workspace_members for an approved membership row. */
-async function isApprovedMember(userId: string): Promise<boolean> {
-  const { data, error } = await adminClient
-    .from("workspace_members")
-    .select("status")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error || !data) return false;
-  return data.status === "approved";
-}
+const short = (v: unknown): v is string =>
+  typeof v === 'string' && /^[A-Za-z0-9_-]{43}$/.test(v);
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+  if (req.headers.get('Origin') && req.headers.get('Origin') !== origin) {
+    return reply(403, { error: 'Origin denied' });
   }
 
-  if (req.method !== "GET" && req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed. Use GET or POST." }, 405);
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   try {
-    const userId = await resolveUser(req);
-    if (!userId) {
-      return jsonResponse({ error: "Authentication required." }, 401);
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceRoleKey) {
+      return reply(503, { error: 'Service unavailable' });
     }
 
-    const approved = await isApprovedMember(userId);
-    if (!approved) {
-      return jsonResponse({ error: "Workspace membership not approved." }, 403);
-    }
+    const db = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
-    const url = new URL(req.url);
-    const path = url.pathname.replace(/^.*\/ar-session/, "") || "/";
+    const path = new URL(req.url).pathname.replace(/^.*\/ar-session/, '') || '/';
+    const bearer = /^Bearer ([A-Za-z0-9._-]{1,8192})$/.exec(req.headers.get('Authorization') ?? '')?.[1];
 
-    // GET / — list the caller's AR sessions
-    if (req.method === "GET" && (path === "/" || path === "")) {
-      const { data, error } = await adminClient
-        .from("ar_sessions")
-        .select("*")
-        .eq("user_id", userId)
-        .order("started_at", { ascending: false })
-        .limit(50);
-
-      if (error) return jsonResponse({ error: "Could not retrieve sessions." }, 500);
-
-      return jsonResponse({
-        sessions: (data as SessionRow[]).map((s) => ({
-          id: s.id,
-          project_id: s.project_id,
-          unity_build_version: s.unity_build_version,
-          device_info: s.device_info,
-          status: s.status,
-          started_at: s.started_at,
-          ended_at: s.ended_at,
-        })),
-        count: data?.length ?? 0,
-      });
-    }
-
-    // GET /active — get the caller's current active session (if any)
-    if (req.method === "GET" && path === "/active") {
-      const { data, error } = await adminClient
-        .from("ar_sessions")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("status", "active")
-        .order("started_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) return jsonResponse({ error: "Could not retrieve active session." }, 500);
-
-      if (!data) {
-        return jsonResponse({ active: false, session: null });
+    // --- Issue / Exchange (POST) ---
+    if (req.method === 'POST' && (path === '/issue' || path === '/exchange')) {
+      if (!req.headers.get('Content-Type')?.startsWith('application/json')) {
+        return reply(415, { error: 'JSON required' });
       }
+      const text = await req.text();
+      if (text.length > 2048) return reply(413, { error: 'Request too large' });
+      const body = JSON.parse(text);
 
-      const s = data as SessionRow;
-      return jsonResponse({
-        active: true,
-        session: {
-          id: s.id,
-          project_id: s.project_id,
-          unity_build_version: s.unity_build_version,
-          device_info: s.device_info,
-          status: s.status,
-          started_at: s.started_at,
-        },
-      });
-    }
-
-    // POST /start — create a new AR session
-    if (req.method === "POST" && path === "/start") {
-      let body: { unity_build_version?: string; device_info?: string; project_id?: string } = {};
-      try {
-        body = await req.json();
-      } catch {
-        return jsonResponse({ error: "Invalid JSON body." }, 400);
-      }
-
-      const version = (body.unity_build_version ?? "").slice(0, 100);
-      const device = (body.device_info ?? "").slice(0, 200);
-      const projectId = body.project_id ?? null;
-
-      // If project_id is supplied, validate it exists.
-      if (projectId) {
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!uuidRegex.test(projectId)) {
-          return jsonResponse({ error: "Invalid project_id." }, 400);
+      if (path === '/issue') {
+        if (!bearer || !short(body.challenge) || !short(body.state)) {
+          return reply(400, { error: 'Invalid request' });
         }
-        const { data: proj } = await adminClient
-          .from("projects")
-          .select("id")
-          .eq("id", projectId)
+        const { data: auth, error } = await db.auth.getUser(bearer);
+        if (error || !auth.user) return reply(401, { error: 'Sign in required' });
+
+        const { data: member, error: me } = await db
+          .from('repair_workspace_members')
+          .select('approved')
+          .eq('user_id', auth.user.id)
           .maybeSingle();
-        if (!proj) {
-          return jsonResponse({ error: "Project not found." }, 404);
-        }
+        if (me) return reply(503, { error: 'Approval service unavailable' });
+        if (member?.approved !== true) return reply(403, { error: 'Workspace approval required' });
+
+        const code = random();
+        const { data: issued, error: ie } = await db.rpc('repair_ar_issue', {
+          p_user: auth.user.id,
+          p_code_hash: await hash(code),
+          p_challenge: body.challenge,
+        });
+        if (ie) return reply(503, { error: 'Issue failed' });
+        if (!issued) return reply(429, { error: 'Wait before trying again' });
+
+        return reply(200, {
+          return_url: `${callback}?code=${code}&state=${body.state}`,
+          expires_in: 90,
+        });
       }
 
-      const { data, error } = await adminClient
-        .from("ar_sessions")
-        .insert({
-          user_id: userId,
-          project_id: projectId,
-          unity_build_version: version,
-          device_info: device,
-          status: "active",
-        })
-        .select("*")
-        .single();
+      // Exchange
+      if (!short(body.code) || typeof body.verifier !== 'string' || !/^[A-Za-z0-9._~-]{43,128}$/.test(body.verifier)) {
+        return reply(400, { error: 'Invalid exchange' });
+      }
 
-      if (error) return jsonResponse({ error: "Could not start AR session." }, 500);
+      const token = 'ar_' + random();
+      const { data, error } = await db.rpc('repair_ar_exchange', {
+        p_code_hash: await hash(body.code),
+        p_challenge: await challenge(body.verifier),
+        p_token_hash: await hash(token),
+      });
+      if (error) return reply(503, { error: 'Exchange unavailable' });
+      if (!data?.[0]) return reply(401, { error: 'Expired or consumed authorization' });
 
-      const s = data as SessionRow;
-      return jsonResponse({
-        session: {
-          id: s.id,
-          project_id: s.project_id,
-          unity_build_version: s.unity_build_version,
-          device_info: s.device_info,
-          status: s.status,
-          started_at: s.started_at,
-        },
+      return reply(200, {
+        access_token: token,
+        token_type: 'bearer',
+        expires_at: Math.floor(new Date(data[0].expires_at).getTime() / 1000),
+        expires_in: 3600,
+        user: { id: data[0].user_id },
       });
     }
 
-    // POST /end — end the caller's active session via SECURITY DEFINER function
-    if (req.method === "POST" && path === "/end") {
-      let body: { session_id?: string; status?: string } = {};
-      try {
-        body = await req.json();
-      } catch {
-        return jsonResponse({ error: "Invalid JSON body." }, 400);
-      }
-
-      const sessionId = body.session_id;
-      const endStatus = body.status ?? "completed";
-
-      if (!sessionId) {
-        return jsonResponse({ error: "session_id is required." }, 400);
-      }
-
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (!uuidRegex.test(sessionId)) {
-        return jsonResponse({ error: "Invalid session_id." }, 400);
-      }
-
-      if (endStatus !== "completed" && endStatus !== "aborted") {
-        return jsonResponse({ error: "status must be 'completed' or 'aborted'." }, 400);
-      }
-
-      // Call the SECURITY DEFINER function with the caller's token so
-      // auth.uid() inside the function resolves to the caller.
-      const authHeader = req.headers.get("Authorization");
-      const token = authHeader?.replace("Bearer ", "").trim();
-      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: `Bearer ${token}` } },
-      });
-
-      const { error } = await userClient.rpc("end_ar_session", {
-        p_session_id: sessionId,
-        p_status: endStatus,
-      });
-
-      if (error) {
-        const msg = error.message.toLowerCase();
-        if (msg.includes("not authorized")) {
-          return jsonResponse({ error: "Not authorized to end this session." }, 403);
-        }
-        if (msg.includes("not found")) {
-          return jsonResponse({ error: "Session not found." }, 404);
-        }
-        if (msg.includes("not active")) {
-          return jsonResponse({ error: "Session is already ended." }, 409);
-        }
-        return jsonResponse({ error: "Could not end AR session." }, 500);
-      }
-
-      return jsonResponse({ success: true, session_id: sessionId, status: endStatus });
+    // --- AR token-authenticated routes ---
+    if (!bearer || !/^ar_[A-Za-z0-9_-]{43}$/.test(bearer)) {
+      return reply(401, { error: 'AR authorization required' });
     }
 
-    return jsonResponse({ error: "Endpoint not found", path }, 404);
-  } catch (err) {
-    return jsonResponse(
-      { error: err instanceof Error ? err.message : "Internal server error" },
-      500
-    );
+    const tokenHash = await hash(bearer);
+    const { data: session, error: se } = await db
+      .from('repair_ar_sessions')
+      .select('user_id,expires_at')
+      .eq('token_hash', tokenHash)
+      .maybeSingle();
+    if (se) return reply(503, { error: 'Session service unavailable' });
+    if (!session || new Date(session.expires_at).getTime() <= Date.now()) {
+      return reply(401, { error: 'AR session expired' });
+    }
+
+    if (req.method === 'POST' && path === '/revoke') {
+      const { error } = await db.from('repair_ar_sessions').delete().eq('token_hash', tokenHash);
+      return reply(error ? 503 : 200, error ? { error: 'Revocation unavailable' } : { revoked: true });
+    }
+
+    const { data: member, error: me } = await db
+      .from('repair_workspace_members')
+      .select('approved')
+      .eq('user_id', session.user_id)
+      .maybeSingle();
+    if (me) return reply(503, { error: 'Approval service unavailable' });
+    if (member?.approved !== true) {
+      await db.from('repair_ar_sessions').delete().eq('token_hash', tokenHash);
+      return reply(403, { error: 'Workspace access revoked' });
+    }
+
+    // Explicit read-only allowlist. Opaque AR tokens never authorize database writes.
+    if (req.method !== 'GET') return reply(405, { error: 'Read only' });
+
+    if (path === '/api/projects') {
+      const { data, error } = await db
+        .from('projects')
+        .select('id,title,category,difficulty,est_hours,status')
+        .order('created_at', { ascending: false });
+      return error
+        ? reply(503, { error: 'Projects unavailable' })
+        : reply(200, { projects: data, count: data?.length ?? 0 });
+    }
+
+    const match = /^\/api\/projects\/([0-9a-f-]{36}|header|ac-recharge|ac)\/steps$/i.exec(path);
+    if (!match) return reply(404, { error: 'Route unavailable' });
+
+    let query = db.from('projects').select('id,title,category,difficulty,est_hours,status');
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(match[1])) {
+      query = query.eq('id', match[1]);
+    } else if (match[1] === 'headers') {
+      query = query.ilike('title', '%Long Tube Headers%');
+    } else if (match[1] === 'ac' || match[1] === 'ac-recharge') {
+      query = query.ilike('title', '%AC System Refrigerant Recharge%');
+    } else {
+      return reply(404, { error: 'Project unavailable' });
+    }
+
+    const { data: project, error: pe } = await query.maybeSingle();
+    if (pe) return reply(503, { error: 'Project unavailable' });
+    if (!project) return reply(404, { error: 'Project not found' });
+
+    const { data: steps, error: ste } = await db
+      .from('project_steps')
+      .select('id,description,fastener_info,torque_spec,tools_required,completed,step_order')
+      .eq('project_id', project.id)
+      .order('step_order');
+    if (ste) return reply(503, { error: 'Steps unavailable' });
+
+    const all = steps ?? [];
+    const completed = all.filter((s: { completed: boolean }) => s.completed).length;
+
+    return reply(200, {
+      project,
+      steps: all.map((s: Record<string, unknown>, i: number) => ({ ...s, step_number: i + 1 })),
+      summary: {
+        total_steps: all.length,
+        completed,
+        remaining: all.length - completed,
+        completion_percentage: all.length ? Math.round((completed / all.length) * 100) : 0,
+      },
+    });
+  } catch {
+    return reply(400, { error: 'Request could not be processed' });
   }
 });

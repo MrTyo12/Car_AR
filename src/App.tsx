@@ -1,46 +1,21 @@
 import { useState } from 'react';
-import { Gauge, Wrench, Package, Video, Car, LogOut, Camera } from 'lucide-react';
+import { Gauge, Wrench, Package, Video, Car, LogOut } from 'lucide-react';
 import { AuthProvider, useAuth } from '@/lib/auth';
-import { Login } from '@/views/Login';
+import { WorkspaceGate, WorkspaceBadge } from '@/components/WorkspaceGate';
+import { ARReturn } from '@/components/ARReturn';
 import { Dashboard } from '@/views/Dashboard';
 import { Projects } from '@/views/Projects';
 import { PartsTools } from '@/views/PartsTools';
 import { Media } from '@/views/Media';
-import { ARReturn } from '@/views/ARReturn';
 
-type Tab = 'dashboard' | 'projects' | 'parts' | 'media' | 'ar';
+type Tab = 'dashboard' | 'projects' | 'parts' | 'media';
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <Gauge size={18} /> },
   { id: 'projects', label: 'Projects', icon: <Wrench size={18} /> },
   { id: 'parts', label: 'Parts & Tools', icon: <Package size={18} /> },
   { id: 'media', label: 'Tutorials', icon: <Video size={18} /> },
-  { id: 'ar', label: 'AR Session', icon: <Camera size={18} /> },
 ];
-
-function Shell() {
-  const { loading } = useAuth();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-carbon-950 flex items-center justify-center">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-scat-600 shadow-lg shadow-scat-950/40">
-          <Car size={22} className="text-white animate-pulse" />
-        </div>
-      </div>
-    );
-  }
-
-  return <Gate />;
-}
-
-function Gate() {
-  const { user } = useAuth();
-
-  if (!user) return <Login />;
-
-  return <AppContent />;
-}
 
 function AppContent() {
   const { user, signOut } = useAuth();
@@ -50,6 +25,8 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-carbon-950">
+      <ARReturn />
+
       {/* Top Header Bar */}
       <header className="sticky top-0 z-40 border-b border-carbon-800 bg-carbon-950/90 backdrop-blur-lg">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
@@ -85,6 +62,8 @@ function AppContent() {
                 </button>
               ))}
             </nav>
+
+            <WorkspaceBadge />
 
             {/* User + sign out */}
             <div className="hidden sm:flex items-center gap-2">
@@ -123,7 +102,6 @@ function AppContent() {
         {active === 'projects' && <Projects />}
         {active === 'parts' && <PartsTools />}
         {active === 'media' && <Media />}
-        {active === 'ar' && <ARReturn />}
       </main>
 
       {/* Mobile bottom nav */}
@@ -152,7 +130,9 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <Shell />
+      <WorkspaceGate>
+        <AppContent />
+      </WorkspaceGate>
     </AuthProvider>
   );
 }

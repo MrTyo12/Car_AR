@@ -1,13 +1,13 @@
 {
   "projectId": "72547631",
   "functions": {
+    "ar-session": {
+      "hasChanged": false,
+      "hash": "112e8ec4164fffa2a381f2ec585b1524b9bb8a98a51167f04e972687e69b525e"
+    },
     "charger-api": {
       "hasChanged": false,
       "hash": "a0cd602b8e1cb28636ce16b23edca219597f3c728380e567b273df6c21dc3769"
-    },
-    "ar-session": {
-      "hasChanged": false,
-      "hash": "56f787e58d032fa8a2163e44c5ca14691d7b44c0c37f7e48bbd61c1f50fc104c"
     }
   }
 }
