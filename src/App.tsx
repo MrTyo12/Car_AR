@@ -1,19 +1,21 @@
 import { useState } from 'react';
-import { Gauge, Wrench, Package, Video, Car, LogOut } from 'lucide-react';
+import { Gauge, Wrench, Package, Video, Car, LogOut, Camera } from 'lucide-react';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { Login } from '@/views/Login';
 import { Dashboard } from '@/views/Dashboard';
 import { Projects } from '@/views/Projects';
 import { PartsTools } from '@/views/PartsTools';
 import { Media } from '@/views/Media';
+import { ARReturn } from '@/views/ARReturn';
 
-type Tab = 'dashboard' | 'projects' | 'parts' | 'media';
+type Tab = 'dashboard' | 'projects' | 'parts' | 'media' | 'ar';
 
 const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <Gauge size={18} /> },
   { id: 'projects', label: 'Projects', icon: <Wrench size={18} /> },
   { id: 'parts', label: 'Parts & Tools', icon: <Package size={18} /> },
   { id: 'media', label: 'Tutorials', icon: <Video size={18} /> },
+  { id: 'ar', label: 'AR Session', icon: <Camera size={18} /> },
 ];
 
 function Shell() {
@@ -121,6 +123,7 @@ function AppContent() {
         {active === 'projects' && <Projects />}
         {active === 'parts' && <PartsTools />}
         {active === 'media' && <Media />}
+        {active === 'ar' && <ARReturn />}
       </main>
 
       {/* Mobile bottom nav */}

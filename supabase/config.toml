@@ -1,2 +1,5 @@
 [functions.charger-api]
 verify_jwt = false
+
+[functions.ar-session]
+verify_jwt = true
