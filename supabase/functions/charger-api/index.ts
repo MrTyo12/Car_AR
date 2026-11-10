@@ -1,5 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.57.4";
 
+// charger-api: gateway JWT verification enabled (verify_jwt=true in config.toml).
+// This function uses the service role key for read-only catalog queries.
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
