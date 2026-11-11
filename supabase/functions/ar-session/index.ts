@@ -166,7 +166,7 @@ Deno.serve(async (req: Request) => {
         : reply(200, { projects: data, count: data?.length ?? 0 });
     }
 
-    const match = /^\/api\/projects\/([0-9a-f-]{36}|header|ac-recharge|ac)\/steps$/i.exec(path);
+    const match = /^\/api\/projects\/([0-9a-f-]{36}|headers|ac-recharge|ac)\/steps$/i.exec(path);
     if (!match) return reply(404, { error: 'Route unavailable' });
 
     let query = db.from('projects').select('id,title,category,difficulty,est_hours,status');
