@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { ShieldCheck } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { AuthPanel } from './AuthPanel';
@@ -29,4 +30,28 @@ export function WorkspaceGate({ children }: { children: ReactNode }) {
     </div>
     {children}
   </>;
+}
+
+export function WorkspaceBadge() {
+  const [session, setSession] = useState<Session | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const { data } = supabase.auth.onAuthStateChange((_event, next) => {
+      if (active) setSession(next);
+    });
+    supabase.auth.getSession().then(({ data }) => {
+      if (active) setSession(data.session);
+    });
+    return () => { active = false; data.subscription.unsubscribe(); };
+  }, []);
+
+  if (!session || session.user.is_anonymous) return null;
+
+  return (
+    <span className="badge bg-green-500/15 text-green-400 border border-green-500/30">
+      <ShieldCheck size={12} />
+      Approved
+    </span>
+  );
 }
